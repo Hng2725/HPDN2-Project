@@ -1,268 +1,95 @@
+/* ================================================================
+   ChatGPT Fake — main.js
+   Quản lý: Chat history, API calls, UI state, LocalStorage
+   ================================================================ */
+
+// ── Khởi tạo Lucide icons ngay khi load ──
 lucide.createIcons();
 
+// ── State ──
 let chats = [];
 let currentChatId = null;
 let currentMessages = [];
+let isLoading = false;
 
-// Initialize API Key
-const apiKeyInput = document.getElementById('apiKey');
-if (localStorage.getItem('openrouter_key')) {
-    apiKeyInput.value = localStorage.getItem('openrouter_key');
-}
+// ── DOM References ──
+const apiKeyInput   = document.getElementById('apiKey');
+const userInput     = document.getElementById('userInput');
+const sendBtn       = document.getElementById('sendBtn');
+const chatContainer = document.getElementById('chatContainer');
+const historyList   = document.getElementById('historyList');
+const chatTitle     = document.getElementById('chatTitle');
+const modelSelect   = document.getElementById('modelSelect');
+const toastEl       = document.getElementById('toast');
+
+// ── Restore API key từ localStorage ──
+const savedKey = localStorage.getItem('openrouter_key');
+if (savedKey) apiKeyInput.value = savedKey;
 
 function saveApiKey() {
-    localStorage.setItem('openrouter_key', apiKeyInput.value);
+    localStorage.setItem('openrouter_key', apiKeyInput.value.trim());
 }
 
-const userInput = document.getElementById('userInput');
-
-// Auto resize textarea
-userInput.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
+// ── Restore model selection (với validation) ──
+const VALID_MODELS = [
+    'deepseek/deepseek-v4-flash:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'google/gemma-4-31b-it:free',
+    'qwen/qwen3-coder:free',
+    'openai/gpt-oss-20b:free',
+    'openai/gpt-oss-120b:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'meta-llama/llama-3.2-3b-instruct:free',
+    'openrouter/free',
+    'openai/gpt-4o-mini',
+    'anthropic/claude-3-haiku',
+];
+const savedModel = localStorage.getItem('selected_model');
+if (savedModel && VALID_MODELS.includes(savedModel)) {
+    const opt = modelSelect.querySelector(`option[value="${savedModel}"]`);
+    if (opt) modelSelect.value = savedModel;
+} else if (savedModel) {
+    // Model cũ không còn hợp lệ → reset về default
+    localStorage.removeItem('selected_model');
+}
+modelSelect.addEventListener('change', () => {
+    localStorage.setItem('selected_model', modelSelect.value);
 });
 
+/* ── Toast helper ── */
+let toastTimer = null;
+function showToast(msg, type = '') {
+    toastEl.textContent = msg;
+    toastEl.className = `toast ${type} show`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        toastEl.className = 'toast';
+    }, 3000);
+}
+
+/* ── Sidebar toggle (mobile) ── */
+let overlay = null;
 function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
-}
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('open');
 
-async function loadChats() {
-    try {
-        const response = await fetch('/api/chats');
-        chats = await response.json();
-        renderHistory();
-        if (chats.length > 0 && !currentChatId) {
-            switchChat(chats[0].id);
-        } else if (chats.length === 0) {
-            currentChatId = null;
-            showWelcome();
-        }
-    } catch (error) {
-        console.error('Failed to load chats:', error);
+    // Overlay cho mobile
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        overlay.addEventListener('click', () => toggleSidebar());
+        document.body.appendChild(overlay);
     }
+    overlay.classList.toggle('show', sidebar.classList.contains('open'));
 }
 
-async function createNewChat() {
-    const id = Date.now().toString();
-    const newChat = {
-        id: id,
-        title: 'Trò chuyện mới'
-    };
-    
-    try {
-        await fetch('/api/chats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newChat)
-        });
-        chats.unshift(newChat);
-        renderHistory();
-        switchChat(id);
-        if (window.innerWidth < 768) toggleSidebar();
-    } catch (error) {
-        console.error('Failed to create chat:', error);
-    }
-}
+/* ── Auto-resize textarea ── */
+userInput.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+});
 
-function renderHistory() {
-    const historyList = document.getElementById('historyList');
-    historyList.innerHTML = '';
-    chats.forEach(chat => {
-        const item = document.createElement('div');
-        item.className = `history-item ${chat.id === currentChatId ? 'active' : ''}`;
-        item.innerHTML = `
-            <i data-lucide="message-square" size="16"></i>
-            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">${chat.title}</span>
-            <button class="delete-btn" onclick="deleteChat(event, '${chat.id}')" title="Xóa">
-                <i data-lucide="trash-2" size="14"></i>
-            </button>
-        `;
-        item.onclick = () => switchChat(chat.id);
-        historyList.appendChild(item);
-    });
-    lucide.createIcons();
-}
-
-async function switchChat(id) {
-    currentChatId = id;
-    const chat = chats.find(c => c.id === id);
-    if(chat) document.getElementById('chatTitle').innerText = chat.title;
-    const container = document.getElementById('chatContainer');
-    container.innerHTML = '';
-    
-    try {
-        const response = await fetch(`/api/chats/${id}/messages`);
-        currentMessages = await response.json();
-        
-        if (currentMessages.length === 0) {
-             showWelcome();
-        } else {
-            currentMessages.forEach(msg => appendMessage(msg.role, msg.content, false));
-        }
-        renderHistory();
-        lucide.createIcons();
-    } catch (error) {
-        console.error('Failed to load messages:', error);
-    }
-}
-
-function showWelcome() {
-    document.getElementById('chatContainer').innerHTML = `
-        <div class="message assistant">
-            <div class="avatar"><i data-lucide="bot" color="white" size="20"></i></div>
-            <div class="message-content">Chào bạn! Hãy chọn hoặc tạo chat mới. Sẵn sàng trả lời câu hỏi của bạn.</div>
-        </div>
-    `;
-    document.getElementById('chatTitle').innerText = 'AI Assistant';
-    lucide.createIcons();
-}
-
-async function deleteChat(event, id) {
-    event.stopPropagation();
-    if (!confirm('Bạn có chắc muốn xóa đoạn hội thoại này?')) return;
-    
-    try {
-        await fetch(`/api/chats/${id}`, { method: 'DELETE' });
-        chats = chats.filter(c => c.id !== id);
-        
-        if (currentChatId === id) {
-            currentChatId = null;
-            currentMessages = [];
-            showWelcome();
-        }
-        renderHistory();
-    } catch (error) {
-        console.error('Failed to delete chat:', error);
-    }
-}
-
-function appendMessage(role, content, saveToLocalList = true) {
-    const container = document.getElementById('chatContainer');
-    const msgDiv = document.createElement('div');
-    const cssRole = role === 'assistant' ? 'assistant' : role;
-    msgDiv.className = `message ${cssRole}`;
-    
-    const icon = role === 'user' ? 'user' : 'bot';
-    msgDiv.innerHTML = `
-        <div class="avatar"><i data-lucide="${icon}" color="white" size="20"></i></div>
-        <div class="message-content">${marked.parse(content)}</div>
-    `;
-    
-    container.appendChild(msgDiv);
-    container.scrollTop = container.scrollHeight;
-    
-    msgDiv.querySelectorAll('pre code').forEach(block => {
-        hljs.highlightElement(block);
-    });
-
-    lucide.createIcons();
-
-    if (saveToLocalList) {
-        currentMessages.push({ role, content });
-    }
-}
-
-async function sendMessage() {
-    const input = document.getElementById('userInput');
-    const btn = document.getElementById('sendBtn');
-    const content = input.value.trim();
-    const key = apiKeyInput.value.trim();
-
-    if (!content || btn.disabled) return;
-
-    input.value = '';
-    input.style.height = 'auto';
-    
-    if (!currentChatId) {
-        await createNewChat();
-    }
-    
-    appendMessage('user', content);
-
-    // Save to DB
-    try {
-        await fetch(`/api/chats/${currentChatId}/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'user', content })
-        });
-        
-        // Update local chat title if it's the first message
-        if (currentMessages.length === 1) {
-             const chat = chats.find(c => c.id === currentChatId);
-             if (chat) {
-                 chat.title = content.substring(0, 25) + (content.length > 25 ? '...' : '');
-                 document.getElementById('chatTitle').innerText = chat.title;
-                 renderHistory();
-             }
-        }
-    } catch (error) {
-        console.error('Failed to save message to DB:', error);
-    }
-
-    const container = document.getElementById('chatContainer');
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'message assistant loading';
-    loadingDiv.innerHTML = `
-        <div class="avatar"><i data-lucide="bot" color="white" size="20"></i></div>
-        <div class="message-content"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>
-    `;
-    container.appendChild(loadingDiv);
-    container.scrollTop = container.scrollHeight;
-    lucide.createIcons();
-
-    btn.disabled = true;
-
-    try {
-        const systemPrompt = { role: 'system', content: 'Bạn là một trợ lý AI thông minh. Yêu cầu bắt buộc: Luôn luôn trả lời bằng tiếng Việt chuẩn, đúng chính tả tuyệt đối, văn phong tự nhiên, thân thiện và dễ hiểu.' };
-        const messagesToSend = [systemPrompt, ...currentMessages];
-
-        const response = await fetch("/api/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "model": document.getElementById('modelSelect').value,
-                "messages": messagesToSend,
-                "apiKey": key
-            })
-        });
-
-        const data = await response.json();
-        if (container.contains(loadingDiv)) container.removeChild(loadingDiv);
-
-        if (data.choices && data.choices[0]) {
-            const reply = data.choices[0].message.content;
-            appendMessage('assistant', reply);
-            
-            // Save bot reply to DB
-            await fetch(`/api/chats/${currentChatId}/messages`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ role: 'assistant', content: reply })
-            });
-            
-        } else if (data.error) {
-            let errorMsg = data.error.message || "Lỗi không xác định từ model.";
-            if (errorMsg.includes("Provider returned error")) {
-                errorMsg = "Model này hiện đang bận hoặc gặp lỗi (Provider error). Vui lòng thử đổi sang model khác trong danh sách!";
-            }
-            appendMessage('assistant', "Lỗi: " + errorMsg, false); // Don't save to array
-        } else {
-            appendMessage('assistant', "Không nhận được phản hồi. Thử đổi model khác!", false);
-        }
-    } catch (error) {
-        if (container.contains(loadingDiv)) container.removeChild(loadingDiv);
-        appendMessage('assistant', "Đã xảy ra lỗi kết nối. Hãy kiểm tra Backend hoặc mạng.", false);
-        console.error(error);
-    } finally {
-        btn.disabled = false;
-        userInput.focus();
-    }
-}
-
-// Handle Enter key properly
+/* ── Enter key handler ── */
 userInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -270,5 +97,356 @@ userInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Initialize on load
+/* ─────────────────────────────────────────────
+   CHAT HISTORY (Load / Render / Switch / Delete)
+   ───────────────────────────────────────────── */
+
+async function loadChats() {
+    try {
+        const res = await fetch('/api/chats');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        chats = await res.json();
+        renderHistory();
+
+        if (chats.length > 0) {
+            switchChat(chats[0].id);
+        } else {
+            showWelcome();
+        }
+    } catch (err) {
+        console.error('Không tải được lịch sử chat:', err);
+        showWelcome();
+        showToast('⚠️ Không kết nối được server', 'error');
+    }
+}
+
+function renderHistory() {
+    historyList.innerHTML = '';
+
+    if (chats.length === 0) {
+        historyList.innerHTML = '<p class="history-empty">Chưa có cuộc trò chuyện nào</p>';
+        return;
+    }
+
+    chats.forEach(chat => {
+        const item = document.createElement('div');
+        item.className = `history-item${chat.id === currentChatId ? ' active' : ''}`;
+        item.dataset.chatId = chat.id;
+        item.innerHTML = `
+            <i data-lucide="message-square" width="15" height="15"></i>
+            <span title="${escapeHtml(chat.title)}">${escapeHtml(chat.title)}</span>
+            <button class="delete-btn" onclick="deleteChat(event,'${chat.id}')" title="Xóa" aria-label="Xóa cuộc trò chuyện">
+                <i data-lucide="x" width="13" height="13"></i>
+            </button>
+        `;
+        item.addEventListener('click', () => switchChat(chat.id));
+        historyList.appendChild(item);
+    });
+
+    lucide.createIcons();
+}
+
+async function switchChat(id) {
+    if (currentChatId === id) return;
+    currentChatId = id;
+    const chat = chats.find(c => c.id === id);
+    if (chat) chatTitle.textContent = chat.title;
+
+    chatContainer.innerHTML = '';
+
+    try {
+        const res = await fetch(`/api/chats/${id}/messages`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        currentMessages = await res.json();
+
+        if (currentMessages.length === 0) {
+            showWelcome();
+        } else {
+            currentMessages.forEach(msg => appendMessage(msg.role, msg.content, false));
+        }
+        renderHistory();
+        lucide.createIcons();
+        scrollToBottom();
+    } catch (err) {
+        console.error('Không tải được tin nhắn:', err);
+        showToast('❌ Lỗi tải tin nhắn', 'error');
+    }
+}
+
+async function createNewChat() {
+    const id = `chat_${Date.now()}`;
+    const newChat = { id, title: 'Cuộc trò chuyện mới' };
+
+    try {
+        const res = await fetch('/api/chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newChat)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        chats.unshift(newChat);
+        currentMessages = [];
+        renderHistory();
+        await switchChat(id);
+
+        if (window.innerWidth < 768 && document.getElementById('sidebar').classList.contains('open')) {
+            toggleSidebar();
+        }
+        userInput.focus();
+    } catch (err) {
+        console.error('Tạo chat thất bại:', err);
+        showToast('❌ Không tạo được chat mới', 'error');
+    }
+}
+
+async function deleteChat(event, id) {
+    event.stopPropagation();
+    if (!confirm('Xóa cuộc trò chuyện này?')) return;
+
+    try {
+        const res = await fetch(`/api/chats/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        chats = chats.filter(c => c.id !== id);
+
+        if (currentChatId === id) {
+            currentChatId = null;
+            currentMessages = [];
+            if (chats.length > 0) {
+                switchChat(chats[0].id);
+            } else {
+                showWelcome();
+            }
+        }
+        renderHistory();
+        showToast('🗑️ Đã xóa cuộc trò chuyện', '');
+    } catch (err) {
+        console.error('Xóa chat thất bại:', err);
+        showToast('❌ Xóa thất bại', 'error');
+    }
+}
+
+async function clearCurrentChat() {
+    if (!currentChatId) return;
+    if (!confirm('Xóa cuộc trò chuyện đang mở?')) return;
+    await deleteChat({ stopPropagation: () => {} }, currentChatId);
+}
+
+/* ─────────────────────────────
+   WELCOME SCREEN
+   ───────────────────────────── */
+const EXAMPLE_PROMPTS = [
+    '💡 Giải thích AI là gì?',
+    '🐍 Viết code Python đọc file CSV',
+    '📝 Tóm tắt văn bản cho tôi',
+    '🌐 Dịch sang tiếng Anh',
+    '🔧 Debug code JavaScript',
+];
+
+function showWelcome() {
+    chatTitle.textContent = 'AI Assistant';
+    currentMessages = [];
+    chatContainer.innerHTML = `
+        <div class="welcome-screen">
+            <div class="logo-icon">
+                <i data-lucide="bot" color="white" width="28" height="28"></i>
+            </div>
+            <h2>Xin chào! Tôi có thể giúp gì?</h2>
+            <p>Chọn một câu hỏi gợi ý hoặc nhập câu hỏi của bạn bên dưới.</p>
+            <div class="welcome-chips">
+                ${EXAMPLE_PROMPTS.map(p => `<button class="chip" onclick="setPrompt('${p.replace(/'/g, "\\'")}')">${p}</button>`).join('')}
+            </div>
+        </div>
+    `;
+    lucide.createIcons();
+}
+
+function setPrompt(text) {
+    userInput.value = text;
+    userInput.dispatchEvent(new Event('input'));
+    userInput.focus();
+}
+
+/* ─────────────────────────────
+   MESSAGES — Append / Render
+   ───────────────────────────── */
+
+function appendMessage(role, content, saveToList = true) {
+    // Xóa welcome screen nếu còn
+    const welcome = chatContainer.querySelector('.welcome-screen');
+    if (welcome) chatContainer.innerHTML = '';
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${role}`;
+    const icon = role === 'user' ? 'user' : 'bot';
+
+    let renderedContent;
+    try {
+        renderedContent = marked.parse(content);
+    } catch {
+        renderedContent = escapeHtml(content);
+    }
+
+    msgDiv.innerHTML = `
+        <div class="avatar"><i data-lucide="${icon}" color="white" width="18" height="18"></i></div>
+        <div class="message-content">${renderedContent}</div>
+    `;
+
+    chatContainer.appendChild(msgDiv);
+    scrollToBottom();
+
+    msgDiv.querySelectorAll('pre code').forEach(block => {
+        try { hljs.highlightElement(block); } catch {}
+    });
+
+    lucide.createIcons();
+
+    if (saveToList) {
+        currentMessages.push({ role, content });
+    }
+}
+
+function scrollToBottom() {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+/* ─────────────────────────────
+   SEND MESSAGE — Core logic
+   ───────────────────────────── */
+
+async function sendMessage() {
+    const content = userInput.value.trim();
+    const apiKey  = apiKeyInput.value.trim();
+
+    if (!content || isLoading) return;
+
+    isLoading = true;
+    sendBtn.disabled = true;
+    userInput.value = '';
+    userInput.style.height = 'auto';
+
+    // Tạo chat mới nếu chưa có
+    if (!currentChatId) {
+        await createNewChat();
+    }
+
+    // Hiển thị và lưu tin nhắn user
+    appendMessage('user', content);
+    await saveMessageToDB('user', content);
+
+    // Cập nhật title nếu đây là tin nhắn đầu tiên
+    if (currentMessages.length === 1) {
+        const newTitle = content.substring(0, 30) + (content.length > 30 ? '…' : '');
+        const chat = chats.find(c => c.id === currentChatId);
+        if (chat) {
+            chat.title = newTitle;
+            chatTitle.textContent = newTitle;
+            renderHistory();
+        }
+    }
+
+    // Loading indicator
+    const loadingDiv = createLoadingBubble();
+    chatContainer.appendChild(loadingDiv);
+    scrollToBottom();
+    lucide.createIcons();
+
+    try {
+        const systemPrompt = {
+            role: 'system',
+            content: 'Bạn là trợ lý AI thông minh, thân thiện. Luôn trả lời bằng tiếng Việt chuẩn mực, đúng chính tả, văn phong tự nhiên và dễ hiểu. Định dạng câu trả lời bằng Markdown khi phù hợp.'
+        };
+
+        const res = await fetch('/api/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: modelSelect.value,
+                messages: [systemPrompt, ...currentMessages],
+                apiKey
+            })
+        });
+
+        const data = await res.json();
+        loadingDiv.remove();
+
+        if (data.choices?.[0]?.message?.content) {
+            const reply = data.choices[0].message.content;
+            appendMessage('assistant', reply);
+            await saveMessageToDB('assistant', reply);
+
+        } else if (data.error) {
+            const errMsg = mapErrorMessage(data.error);
+            appendMessage('assistant', `❌ **Lỗi:** ${errMsg}`, false);
+            showToast('⚠️ Model trả về lỗi', 'error');
+        } else {
+            appendMessage('assistant', '⚠️ Không nhận được phản hồi. Thử đổi model khác!', false);
+        }
+
+    } catch (err) {
+        loadingDiv.remove();
+        appendMessage('assistant', '❌ **Lỗi kết nối.** Hãy kiểm tra backend server đang chạy và thử lại.', false);
+        console.error('sendMessage error:', err);
+        showToast('❌ Lỗi kết nối server', 'error');
+    } finally {
+        isLoading = false;
+        sendBtn.disabled = false;
+        userInput.focus();
+    }
+}
+
+/* ─────────────────────────────
+   HELPERS
+   ───────────────────────────── */
+
+async function saveMessageToDB(role, content) {
+    try {
+        const res = await fetch(`/api/chats/${currentChatId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, content })
+        });
+        if (!res.ok) console.warn(`saveMessageToDB: HTTP ${res.status}`);
+    } catch (err) {
+        console.error('Lỗi lưu tin nhắn:', err);
+    }
+}
+
+function createLoadingBubble() {
+    const div = document.createElement('div');
+    div.className = 'message assistant';
+    div.innerHTML = `
+        <div class="avatar"><i data-lucide="bot" color="white" width="18" height="18"></i></div>
+        <div class="message-content">
+            <div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        </div>
+    `;
+    return div;
+}
+
+function mapErrorMessage(error) {
+    const msg = error.message || '';
+    if (msg.includes('No endpoints found'))
+        return 'Model này hiện không có endpoint. Vui lòng **chọn model khác** trong dropdown bên trên.';
+    if (msg.includes('Provider returned error'))
+        return 'Provider đang bận hoặc gặp lỗi. Thử lại sau hoặc **đổi model khác**.';
+    if (msg.includes('401') || msg.includes('Invalid API key'))
+        return 'API Key không hợp lệ. Kiểm tra lại Key của bạn.';
+    if (msg.includes('rate limit') || msg.includes('429'))
+        return 'Đã vượt giới hạn yêu cầu (rate limit). Thử lại sau vài giây.';
+    return msg || 'Lỗi không xác định.';
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/* ─────────────────────────────
+   INIT
+   ───────────────────────────── */
 document.addEventListener('DOMContentLoaded', loadChats);

@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Proxy - powered by OpenRouter</title>
+    <meta name="description" content="AI Chat - Giao diện chat AI powered by OpenRouter, hỗ trợ nhiều model AI miễn phí.">
+    <title>AI Chat — Powered by OpenRouter</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
@@ -14,56 +15,82 @@
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
     <aside class="sidebar" id="sidebar">
-        <button class="new-chat-btn" onclick="createNewChat()">
+        <button class="new-chat-btn" id="newChatBtn" onclick="createNewChat()" title="Tạo cuộc trò chuyện mới">
             <i data-lucide="plus"></i>
-            New Chat
+            Cuộc trò chuyện mới
         </button>
         <div class="history-list" id="historyList">
-            <!-- Saved chats will appear here -->
+            <!-- Lịch sử chat sẽ hiển thị ở đây -->
         </div>
         <div class="settings">
-            <label style="font-size: 0.8rem; color: var(--text-secondary);">OpenRouter API Key:</label>
-            <input type="password" id="apiKey" class="api-key-input" placeholder="Để trống để dùng Server Key" 
-                   oninput="saveApiKey()">
-            <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 5px;">
-                Key được gửi tới server hoặc để trống nếu server đã cấu hình.
+            <label for="apiKey" style="font-size: 0.8rem; color: var(--text-secondary); display:block; margin-bottom:4px;">
+                🔑 OpenRouter API Key
+            </label>
+            <input type="password" id="apiKey" class="api-key-input"
+                   placeholder="Để trống để dùng Server Key"
+                   oninput="saveApiKey()"
+                   autocomplete="off">
+            <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 6px; line-height:1.5;">
+                Key được mã hóa trong localStorage. Để trống nếu server đã cấu hình sẵn trong <code>.env</code>.
             </p>
         </div>
     </aside>
 
     <main class="main-content">
         <header class="header">
-            <h1 id="chatTitle">AI Assistant</h1>
-            <div style="display: flex; gap: 10px;">
-                <select id="modelSelect" class="api-key-input" style="width: auto; margin-top: 0;">
-                    <option value="google/gemini-2.0-flash-001:free">Gemini 2.0 Flash (Khuyên dùng - Tiếng Việt chuẩn)</option>
-                    <option value="openrouter/free">Auto: Tự động chọn model Free tốt nhất</option>
-                    <option value="mistralai/mistral-7b-instruct:free">Mistral 7B (Free)</option>
-                    <option value="google/gemma-7b-it:free">Gemma 7B (Free)</option>
+            <div class="header-left">
+                <button class="icon-btn" id="mobileMenuBtn" onclick="toggleSidebar()" title="Menu" aria-label="Toggle sidebar">
+                    <i data-lucide="panel-left"></i>
+                </button>
+                <h1 id="chatTitle">AI Assistant</h1>
+            </div>
+            <div class="header-right">
+                <select id="modelSelect" class="model-select" title="Chọn AI model">
+                    <optgroup label="🌟 Khuyên dùng (Free)">
+                        <option value="deepseek/deepseek-v4-flash:free">DeepSeek V4 Flash ⭐</option>
+                        <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B</option>
+                        <option value="google/gemma-4-31b-it:free">Gemma 4 31B</option>
+                        <option value="qwen/qwen3-coder:free">Qwen3 Coder 480B</option>
+                    </optgroup>
+                    <optgroup label="🤖 Khác (Free)">
+                        <option value="openai/gpt-oss-20b:free">OpenAI OSS 20B (Free)</option>
+                        <option value="openai/gpt-oss-120b:free">OpenAI OSS 120B (Free)</option>
+                        <option value="nvidia/nemotron-3-super-120b-a12b:free">NVIDIA Nemotron Super 120B</option>
+                        <option value="meta-llama/llama-3.2-3b-instruct:free">Llama 3.2 3B (nhẹ)</option>
+                        <option value="openrouter/free">Auto: Model Free tốt nhất</option>
+                    </optgroup>
+                    <optgroup label="⚡ Trả phí (cần API Key)">
+                        <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                        <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
+                    </optgroup>
                 </select>
-                <button class="history-item" onclick="toggleSidebar()" style="padding: 5px; margin: 0; display: none;" id="mobileMenu">
-                    <i data-lucide="menu"></i>
+                <button class="icon-btn" id="clearChatBtn" onclick="clearCurrentChat()" title="Xóa chat hiện tại" aria-label="Clear current chat">
+                    <i data-lucide="trash-2"></i>
                 </button>
             </div>
         </header>
 
-        <div class="chat-container" id="chatContainer">
-            <div class="message assistant">
-                <div class="avatar"><i data-lucide="bot" color="white" size="20"></i></div>
-                <div class="message-content">
-                    Đang kết nối tới Server...
-                </div>
-            </div>
+        <div class="chat-container" id="chatContainer" role="log" aria-label="Nội dung cuộc trò chuyện">
+            <!-- Messages will be appended here -->
         </div>
 
         <div class="input-area">
             <div class="input-wrapper">
-                <textarea id="userInput" placeholder="Hỏi tôi bất cứ điều gì... (Enter để gửi)" rows="1"></textarea>
-                <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                <textarea id="userInput"
+                          placeholder="Hỏi tôi bất cứ điều gì… (Enter để gửi, Shift+Enter xuống dòng)"
+                          rows="1"
+                          aria-label="Nhập tin nhắn"
+                          maxlength="8000"></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()" aria-label="Gửi tin nhắn" title="Gửi (Enter)">
                     <i data-lucide="send"></i>
                 </button>
             </div>
+            <p class="input-hint">AI có thể mắc lỗi. Hãy kiểm tra thông tin quan trọng.</p>
         </div>
     </main>
 
