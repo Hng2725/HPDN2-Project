@@ -32,6 +32,7 @@ function saveApiKey() {
 
 // ── Restore model selection (với validation) ──
 const VALID_MODELS = [
+    'openrouter/free',
     'deepseek/deepseek-v4-flash:free',
     'meta-llama/llama-3.3-70b-instruct:free',
     'google/gemma-4-31b-it:free',
@@ -40,7 +41,6 @@ const VALID_MODELS = [
     'openai/gpt-oss-120b:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
     'meta-llama/llama-3.2-3b-instruct:free',
-    'openrouter/free',
     'openai/gpt-4o-mini',
     'anthropic/claude-3-haiku',
 ];
@@ -368,20 +368,81 @@ async function sendMessage() {
             })
         });
 
-        const data = await res.json();
         loadingDiv.remove();
 
-        if (data.choices?.[0]?.message?.content) {
-            const reply = data.choices[0].message.content;
-            appendMessage('assistant', reply);
-            await saveMessageToDB('assistant', reply);
+        // Kiểm tra Content-Type — nếu là SSE thì stream, không thì parse JSON lỗi
+        const contentType = res.headers.get('content-type') || '';
 
-        } else if (data.error) {
-            const errMsg = mapErrorMessage(data.error);
-            appendMessage('assistant', `❌ **Lỗi:** ${errMsg}`, false);
-            showToast('⚠️ Model trả về lỗi', 'error');
+        if (!contentType.includes('text/event-stream')) {
+            // Lỗi trả về dạng JSON (400, 402, 429...)
+            const data = await res.json();
+            if (data.error) {
+                appendMessage('assistant', `❌ **Lỗi:** ${mapErrorMessage(data.error)}`, false);
+                showToast('⚠️ Model trả về lỗi', 'error');
+            }
+            return;
+        }
+
+        // ── Streaming mode ──
+        // Tạo bubble trả lời rỗng, sẽ điền dần
+        const replyDiv = document.createElement('div');
+        replyDiv.className = 'message assistant';
+        replyDiv.innerHTML = `
+            <div class="avatar"><i data-lucide="bot" color="white" width="18" height="18"></i></div>
+            <div class="message-content streaming-content"></div>
+        `;
+        chatContainer.appendChild(replyDiv);
+        lucide.createIcons();
+        const contentEl = replyDiv.querySelector('.message-content');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // giữ lại dòng chưa hoàn chỉnh
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const raw = line.slice(6).trim();
+                if (raw === '[DONE]') break;
+
+                try {
+                    const chunk = JSON.parse(raw);
+                    const delta = chunk.choices?.[0]?.delta?.content;
+                    if (delta) {
+                        fullText += delta;
+                        // Render markdown mỗi khi có thêm text
+                        try {
+                            contentEl.innerHTML = marked.parse(fullText);
+                        } catch {
+                            contentEl.textContent = fullText;
+                        }
+                        scrollToBottom();
+                    }
+                } catch { /* bỏ qua chunk parse lỗi */ }
+            }
+        }
+
+        // Highlight code blocks sau khi stream xong
+        replyDiv.querySelectorAll('pre code').forEach(block => {
+            try { hljs.highlightElement(block); } catch {}
+        });
+        // Tắt blinking cursor
+        contentEl.classList.remove('streaming-content');
+        scrollToBottom();
+
+        if (fullText) {
+            currentMessages.push({ role: 'assistant', content: fullText });
+            await saveMessageToDB('assistant', fullText);
         } else {
-            appendMessage('assistant', '⚠️ Không nhận được phản hồi. Thử đổi model khác!', false);
+            contentEl.innerHTML = '⚠️ Không nhận được phản hồi. Thử đổi model khác!';
         }
 
     } catch (err) {
