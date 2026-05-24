@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat Proxy - powered by OpenRouter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <aside class="sidebar" id="sidebar">
+        <button class="new-chat-btn" onclick="createNewChat()">
+            <i data-lucide="plus"></i>
+            New Chat
+        </button>
+        <div class="history-list" id="historyList">
+            <!-- Saved chats will appear here -->
+        </div>
+        <div class="settings">
+            <label style="font-size: 0.8rem; color: var(--text-secondary);">OpenRouter API Key:</label>
+            <input type="password" id="apiKey" class="api-key-input" placeholder="Để trống để dùng Server Key" 
+                   oninput="saveApiKey()">
+            <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 5px;">
+                Key được gửi tới server hoặc để trống nếu server đã cấu hình.
+            </p>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="header">
+            <h1 id="chatTitle">AI Assistant</h1>
+            <div style="display: flex; gap: 10px;">
+                <select id="modelSelect" class="api-key-input" style="width: auto; margin-top: 0;">
+                    <option value="google/gemini-2.0-flash-001:free">Gemini 2.0 Flash (Khuyên dùng - Tiếng Việt chuẩn)</option>
+                    <option value="openrouter/free">Auto: Tự động chọn model Free tốt nhất</option>
+                    <option value="mistralai/mistral-7b-instruct:free">Mistral 7B (Free)</option>
+                    <option value="google/gemma-7b-it:free">Gemma 7B (Free)</option>
+                </select>
+                <button class="history-item" onclick="toggleSidebar()" style="padding: 5px; margin: 0; display: none;" id="mobileMenu">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+        </header>
+
+        <div class="chat-container" id="chatContainer">
+            <div class="message assistant">
+                <div class="avatar"><i data-lucide="bot" color="white" size="20"></i></div>
+                <div class="message-content">
+                    Đang kết nối tới Server...
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-wrapper">
+                <textarea id="userInput" placeholder="Hỏi tôi bất cứ điều gì... (Enter để gửi)" rows="1"></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                    <i data-lucide="send"></i>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script src="/js/main.js"></script>
+</body>
+</html>
